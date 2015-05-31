@@ -35,13 +35,14 @@ data = sc.textFile('iris.dat').map(parse_point)
 
 # data = sc.parallelize([
 #     LabeledPoint(0.0, [0.0, 10.0]),
-#     LabeledPoint(1.0, [10.0, 0.0]),
+#     LabeledPoint(1.0, [10.0, 10.0]),
 #     LabeledPoint(2.0, [0.0, 0.0]),
-#     LabeledPoint(2.0, [10.0, 10.0]),
-#     LabeledPoint(2.0, [5.0, 5.0])
+#     LabeledPoint(2.0, [10.0, 0.0]),
+#     LabeledPoint(2.0, [5.0, 5.0]),
+#     LabeledPoint(2.0, [0.0, 5.0])
 # ])
 
-model = LogisticRegressionWithLBFGS.train(data, iterations=100, numClasses=3, corrections=100000, regType='l1')
+model = LogisticRegressionWithLBFGS.train(data, iterations=100, numClasses=3, corrections=100000, regType=None, intercept=True)
 
 labelsAndPreds = data.map(lambda p: (p.label, model.predict(p.features)))
 trainingError = labelsAndPreds.filter(lambda (value, prediction): value != prediction).count() / float(data.count())
@@ -52,7 +53,7 @@ print('Training error = %s' % trainingError)
 X = np.array(data.map(lambda p: p.features).collect())
 Y = np.array(data.map(lambda p: p.label).collect())
 
-MESH_STEP_SIZE = 0.2
+MESH_STEP_SIZE = 0.02
 
 # Plot the decision boundary
 
