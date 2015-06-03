@@ -57,7 +57,7 @@ def parse_point(line):
     return LabeledPoint(flower_code, features)
 
 
-def visualize(data, models, name, testError):
+def visualize(data, models, name, testAccuracy):
     # Plot the decision boundary
     xx, yy = np.meshgrid(np.arange(X_MIN, X_MAX, MESH_STEP_SIZE), np.arange(Y_MIN, Y_MAX, MESH_STEP_SIZE))
     gridPoints = sc.parallelize(np.c_[xx.ravel(), yy.ravel()].tolist())
@@ -76,7 +76,7 @@ def visualize(data, models, name, testError):
     plt.scatter(X[:, 0], X[:, 1], c=Y, edgecolors='k')
     plt.xlabel('Sepal length')
     plt.ylabel('Sepal width')
-    plt.title('Test error = %.3f' % testError)
+    plt.title('Test error = %.3f' % testAccuracy)
 
     plt.savefig(name)
     plt.close()
@@ -159,9 +159,9 @@ def main():
 
     testDataActualAndPrediction = predict(testData.toDF(), models).map(lambda row: (row.label, row.prediction))
     numOfError = testDataActualAndPrediction.filter(lambda (actual, prediction): prediction != actual).count()
-    testError = float(numOfError) / testData.count()
+    testAccuracy = float(numOfError) / testData.count()
 
-    visualize(data, models, 'result-%d' % random_seed, testError)
+    visualize(data, models, 'result-%d' % random_seed, testAccuracy)
 
 
 main()
