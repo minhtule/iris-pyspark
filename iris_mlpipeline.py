@@ -32,9 +32,9 @@ sqlContext = SQLContext(sc)
 #    -- Iris-virginica (2)
 
 MAP_FLOWER_NAME_TO_CODE = {
-    'Iris-setosa': 2,
+    'Iris-setosa': 0,
     'Iris-versicolor': 1,
-    'Iris-virginica': 0
+    'Iris-virginica': 2
 }
 
 MAP_CODE_TO_FLOW_NAME = {v: k for (k, v) in MAP_FLOWER_NAME_TO_CODE.iteritems()}
@@ -87,7 +87,7 @@ def buildModel(data, label):
     """
     Build a pipeline to classify `label` against the rest of classes using Binary Regression Classification
 
-    :param data: the training data as RDD
+    :param data: the training data as a DF
     :param label: 0..C-1 where C is the number of classes
     :param shouldDisplayGraph: True to plot the graph illustrating the classification
     :return: the model as a Transformer
@@ -153,11 +153,13 @@ def main():
     data = sc.textFile('iris.dat').map(parse_point)
     random_seed = randint(0, 1e5)
     trainingData, testData = data.randomSplit([8, 2], seed=random_seed)
+    trainingData = trainingData.toDF()
+    testData = testData.toDF()
 
     numClasses = 3
     models = [buildModel(trainingData, label) for label in range(numClasses)]
 
-    testDataActualAndPrediction = predict(testData.toDF(), models).map(lambda row: (row.label, row.prediction))
+    testDataActualAndPrediction = predict(testData, models).map(lambda row: (row.label, row.prediction))
     numOfError = testDataActualAndPrediction.filter(lambda (actual, prediction): prediction != actual).count()
     testAccuracy = float(numOfError) / testData.count()
 
