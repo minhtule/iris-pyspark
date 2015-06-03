@@ -8,6 +8,8 @@ from pyspark import SparkConf, SparkContext, SQLContext
 from pyspark.mllib.regression import LabeledPoint
 from pyspark.mllib.linalg import Vectors
 from pyspark.sql import Row
+from pyspark.sql.types import *
+from pyspark.sql.functions import udf
 from pyspark.ml.classification import LogisticRegression
 from pyspark.ml.pipeline import Pipeline
 from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
@@ -37,6 +39,10 @@ MAP_FLOWER_NAME_TO_CODE = {
 
 MAP_CODE_TO_FLOW_NAME = {v: k for (k, v) in MAP_FLOWER_NAME_TO_CODE.iteritems()}
 
+RAW_PREDICTION_COLUMN_FORMAT = 'rawPrediction_%d'
+PROBABILITY_COLUMN_FORMAT = 'probability_%d'
+PREDICTION_COLUMN_FORMAT = 'prediction_%d'
+
 X_MIN = 3.8
 X_MAX = 8.4
 Y_MIN = 1.5
@@ -54,8 +60,9 @@ def parse_point(line):
 def visualize(data, models, name, testError):
     # Plot the decision boundary
     xx, yy = np.meshgrid(np.arange(X_MIN, X_MAX, MESH_STEP_SIZE), np.arange(Y_MIN, Y_MAX, MESH_STEP_SIZE))
-    grid_points = sc.parallelize(np.c_[xx.ravel(), yy.ravel()].tolist())
-    Z = np.array(predict(grid_points, models))
+    gridPoints = sc.parallelize(np.c_[xx.ravel(), yy.ravel()].tolist())
+    gridPointsDF = gridPoints.map(lambda x: Row(features=Vectors.dense(x))).toDF()
+    Z = np.array(predict(gridPointsDF, models).map(lambda p: p.prediction).collect())
 
     Z = Z.reshape(xx.shape)
     plt.figure(1)
@@ -103,29 +110,43 @@ def buildModel(data, label):
     return model
 
 
-def selectBestPrediction(predictions):
-    bestPrediction = 0
-    bestProbability = predictions[0].probability[0]
-    for index, prediction in enumerate(predictions):
-        if prediction.probability[0] > bestProbability:
-            bestPrediction = index
-            bestProbability = prediction.probability[0]
+def selectBestPrediction(*probabilities):
+    """
+    Pick the column with the best prediction
 
-    return bestPrediction
+    :param probabilities: Columns of DenseVector's each of which represents the probability of a label classification.
+                          Here, DenseVector is in pickle object format net.razorvine.pickle.objects.ClassDictConstructor
+                          e.g. [1, null, null, [0.825, 0.175]]
+                          So to get the prediction probability for the label, use x[3][0].
+    :return: the label with the highest probability
+    """
+    bestLabel, bestProbability = max(enumerate(probabilities), key=lambda x: x[1][3][0])
+    return bestLabel
 
 
 def predict(points, models):
     """
     Predict the label of points
 
-    :param points: RDD of Vector of features
+    :param points: DF of Vector of features
     :param models: Prediction models for all class
-    :return: Return label predictions
+    :return: Return a new DF with an additional column containing label predictions
     """
-    points = points.zipWithIndex().map(lambda p: Row(id=p[1], features=Vectors.dense(p[0]))).toDF()
-    multiclass_predictions = [model.transform(points).orderBy('id').rdd.collect() for model in models]
+    predictions = points
 
-    return map(selectBestPrediction, zip(*multiclass_predictions))
+    for label, model in enumerate(models):
+        predictions = model.transform(predictions)\
+            .withColumnRenamed('rawPrediction', RAW_PREDICTION_COLUMN_FORMAT % label)\
+            .withColumnRenamed('probability', PROBABILITY_COLUMN_FORMAT % label)\
+            .withColumnRenamed('prediction', PREDICTION_COLUMN_FORMAT % label)\
+
+    numClasses = len(models)
+    if numClasses:
+        selectBestPredictionUDF = udf(selectBestPrediction, DoubleType())
+        probabilityColumns = [predictions[PROBABILITY_COLUMN_FORMAT % label] for label in range(numClasses)]
+        predictions = predictions.withColumn('prediction', selectBestPredictionUDF(*probabilityColumns))
+
+    return predictions
 
 
 def main():
@@ -136,9 +157,8 @@ def main():
     numClasses = 3
     models = [buildModel(trainingData, label) for label in range(numClasses)]
 
-    testDataPredictionAndActual = zip(predict(testData.map(lambda x: x.features), models),
-                                      map(lambda p: p.label, testData.collect()))
-    numOfError = len(filter(lambda x: x[0] != x[1], testDataPredictionAndActual))
+    testDataActualAndPrediction = predict(testData.toDF(), models).map(lambda row: (row.label, row.prediction))
+    numOfError = testDataActualAndPrediction.filter(lambda (actual, prediction): prediction != actual).count()
     testError = float(numOfError) / testData.count()
 
     visualize(data, models, 'result-%d' % random_seed, testError)
